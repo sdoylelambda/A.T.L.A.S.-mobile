@@ -1,0 +1,156 @@
+// lib/services/atlas_service.dart
+//
+// HTTP client for the Atlas FastAPI server.
+// Handles /command and /status endpoints.
+// Both API key and server URL stored in flutter_secure_storage.
+// Nothing sensitive is hardcoded or committed to git.
+
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
+class AtlasService {
+  static const _storage      = FlutterSecureStorage();
+  static const _keyApiKey    = 'atlas_api_key';
+  static const _keyServerUrl = 'atlas_server_url';
+
+  // ---------------------------------------------------------------------------
+  // Config — read from secure storage only, nothing hardcoded
+  // ---------------------------------------------------------------------------
+
+  Future<String?> getServerUrl() async {
+    return await _storage.read(key: _keyServerUrl);
+  }
+
+  Future<String?> getApiKey() async {
+    return await _storage.read(key: _keyApiKey);
+  }
+
+  Future<void> saveSettings({
+    required String serverUrl,
+    required String apiKey,
+  }) async {
+    await _storage.write(key: _keyServerUrl, value: serverUrl.trim());
+    await _storage.write(key: _keyApiKey,    value: apiKey.trim());
+  }
+
+  Future<bool> isConfigured() async {
+    final url = await getServerUrl();
+    final key = await getApiKey();
+    return url != null && url.isNotEmpty &&
+           key != null && key.isNotEmpty;
+  }
+
+  /// Wipe all stored credentials from device secure storage.
+  /// Call this if the API key is compromised or on logout.
+  Future<void> clearSettings() async {
+    await _storage.deleteAll();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Endpoints
+  // ---------------------------------------------------------------------------
+
+  /// GET /status
+  /// Returns atlas running state. No auth required.
+  Future<AtlasStatus> getStatus() async {
+    final url = await getServerUrl();
+
+    if (url == null || url.isEmpty) {
+      return AtlasStatus(isRunning: false, state: 'not configured');
+    }
+
+    try {
+      final response = await http
+          .get(Uri.parse('$url/status'))
+          .timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return AtlasStatus(
+          isRunning: data['atlas_running'] ?? false,
+          state:     data['state'] ?? 'unknown',
+        );
+      }
+      return AtlasStatus(isRunning: false, state: 'error');
+    } catch (_) {
+      return AtlasStatus(isRunning: false, state: 'unreachable');
+    }
+  }
+
+  /// POST /command
+  /// Sends text command to Atlas, returns spoken response.
+  /// Timeout 60s — Mistral can be slow on complex tasks.
+  Future<AtlasResponse> sendCommand(String text) async {
+    final url    = await getServerUrl();
+    final apiKey = await getApiKey();
+
+    if (url == null || url.isEmpty) {
+      return AtlasResponse.error(
+        'No server URL set. Go to Settings and enter your Atlas server address.',
+      );
+    }
+
+    if (apiKey == null || apiKey.isEmpty) {
+      return AtlasResponse.error(
+        'No API key set. Go to Settings and add your Atlas API key.',
+      );
+    }
+
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$url/command'),
+            headers: {
+              'Content-Type': 'application/json',
+              'X-API-Key':    apiKey,
+            },
+            body: jsonEncode({'text': text}),
+          )
+          .timeout(const Duration(seconds: 60));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return AtlasResponse(
+          text:    data['response'] ?? 'No response.',
+          state:   data['state']    ?? 'listening',
+          success: true,
+        );
+      } else if (response.statusCode == 401) {
+        return AtlasResponse.error('Invalid API key. Check Settings.');
+      } else {
+        return AtlasResponse.error('Atlas error: ${response.statusCode}');
+      }
+    } on Exception catch (e) {
+      return AtlasResponse.error('Could not reach Atlas: $e');
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Models
+// ---------------------------------------------------------------------------
+
+class AtlasStatus {
+  final bool   isRunning;
+  final String state;
+  const AtlasStatus({required this.isRunning, required this.state});
+}
+
+class AtlasResponse {
+  final String text;
+  final String state;
+  final bool   success;
+
+  const AtlasResponse({
+    required this.text,
+    required this.state,
+    required this.success,
+  });
+
+  factory AtlasResponse.error(String message) => AtlasResponse(
+    text:    message,
+    state:   'error',
+    success: false,
+  );
+}
