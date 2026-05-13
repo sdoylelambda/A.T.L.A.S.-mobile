@@ -2,8 +2,11 @@
 //
 // Settings screen for Atlas server URL and API key.
 // Stored securely via flutter_secure_storage — never in plaintext.
+// QR scan button auto-fills the API key field from a QR code
+// generated on the computer.
 
 import 'package:flutter/material.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import '../services/atlas_service.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -14,13 +17,12 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  final AtlasService _atlas = AtlasService();
-  final _urlController      = TextEditingController();
-  final _keyController      = TextEditingController();
-  final _formKey            = GlobalKey<FormState>();
+  final AtlasService _atlas  = AtlasService();
+  final _urlController       = TextEditingController();
+  final _keyController       = TextEditingController();
+  final _formKey             = GlobalKey<FormState>();
 
   bool _obscureKey = true;
-  bool _saved      = false;
 
   @override
   void initState() {
@@ -34,6 +36,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _keyController.dispose();
     super.dispose();
   }
+
+  // ---------------------------------------------------------------------------
+  // Load / Save / Clear
+  // ---------------------------------------------------------------------------
 
   Future<void> _loadSettings() async {
     final url = await _atlas.getServerUrl();
@@ -50,7 +56,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       serverUrl: _urlController.text.trim(),
       apiKey:    _keyController.text.trim(),
     );
-    setState(() => _saved = true);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -61,7 +66,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       );
     }
   }
-
 
   Future<void> _clearSettings() async {
     final confirm = await showDialog<bool>(
@@ -106,6 +110,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   // ---------------------------------------------------------------------------
+  // QR Scanner
+  // ---------------------------------------------------------------------------
+
+  Future<void> _scanQrCode() async {
+    final result = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(builder: (_) => const _QrScanScreen()),
+    );
+    if (result != null && result.isNotEmpty) {
+      setState(() => _keyController.text = result);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content:         Text('API key scanned — tap Save to confirm'),
+            backgroundColor: Color(0xFF00cc66),
+            duration:        Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Build
   // ---------------------------------------------------------------------------
 
@@ -122,7 +149,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         iconTheme: const IconThemeData(color: Color(0xFF8a9ab8)),
       ),
       body: SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: Form(
             key: _formKey,
@@ -130,22 +157,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
 
-                const Text(
-                  'Atlas Server',
-                  style: TextStyle(
-                    color:      Color(0xFF1a6aff),
-                    fontSize:   13,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1.5,
-                  ),
-                ),
+                // ---- Section: Connection ----
+                _sectionLabel('CONNECTION'),
                 const SizedBox(height: 8),
 
                 // Server URL
                 TextFormField(
-                  controller:  _urlController,
-                  style:       const TextStyle(color: Color(0xFFc8d8e8)),
-                  decoration:  _inputDecoration(
+                  controller:   _urlController,
+                  style:        const TextStyle(color: Color(0xFFc8d8e8)),
+                  decoration:   _inputDecoration(
                     label: 'Server URL',
                     hint:  'http://100.x.x.x:8000',
                     icon:  Icons.dns,
@@ -153,36 +173,81 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   keyboardType: TextInputType.url,
                   validator: (v) {
                     if (v == null || v.trim().isEmpty) return 'Required';
-                    if (!v.startsWith('http')) return 'Must start with http:// or https://';
+                    if (!v.startsWith('http')) return 'Must start with http://';
                     return null;
                   },
                 ),
 
                 const SizedBox(height: 20),
 
-                // API Key
-                TextFormField(
-                  controller:    _keyController,
-                  obscureText:   _obscureKey,
-                  style:         const TextStyle(color: Color(0xFFc8d8e8)),
-                  decoration:    _inputDecoration(
-                    label: 'API Key',
-                    hint:  'Your Atlas API key',
-                    icon:  Icons.key,
-                  ).copyWith(
-                    suffixIcon: IconButton(
-                      icon: Icon(
-                        _obscureKey ? Icons.visibility : Icons.visibility_off,
-                        color: const Color(0xFF8a9ab8),
+                // API Key field + QR scan button
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        controller:  _keyController,
+                        obscureText: _obscureKey,
+                        style:       const TextStyle(color: Color(0xFFc8d8e8)),
+                        decoration:  _inputDecoration(
+                          label: 'API Key',
+                          hint:  'Paste or scan QR code',
+                          icon:  Icons.key,
+                        ).copyWith(
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              _obscureKey ? Icons.visibility : Icons.visibility_off,
+                              color: const Color(0xFF8a9ab8),
+                            ),
+                            onPressed: () =>
+                                setState(() => _obscureKey = !_obscureKey),
+                          ),
+                        ),
+                        validator: (v) {
+                          if (v == null || v.trim().isEmpty) return 'Required';
+                          if (v.trim().length < 16) return 'Key seems too short';
+                          return null;
+                        },
                       ),
-                      onPressed: () => setState(() => _obscureKey = !_obscureKey),
                     ),
+                    const SizedBox(width: 10),
+
+                    // QR scan button
+                    Tooltip(
+                      message: 'Scan QR code',
+                      child: InkWell(
+                        onTap: _scanQrCode,
+                        borderRadius: BorderRadius.circular(8),
+                        child: Container(
+                          height: 58,
+                          width:  58,
+                          decoration: BoxDecoration(
+                            color:        const Color(0xFF1a1a2e),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFF2a2a4e)),
+                          ),
+                          child: const Icon(
+                            Icons.qr_code_scanner,
+                            color: Color(0xFF1a6aff),
+                            size:  28,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 8),
+
+                // QR hint
+                const Text(
+                  'Generate QR on your computer:\n'
+                  'python3 ~/dev/A.T.L.A.S./api/gen_qr.py',
+                  style: TextStyle(
+                    color:    Color(0xFF4a5a6a),
+                    fontSize: 11,
+                    height:   1.5,
                   ),
-                  validator: (v) {
-                    if (v == null || v.trim().isEmpty) return 'Required';
-                    if (v.trim().length < 16) return 'Key seems too short';
-                    return null;
-                  },
                 ),
 
                 const SizedBox(height: 32),
@@ -211,35 +276,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
 
-                const SizedBox(height: 24),
-
-                // Help text
-                const Text(
-                  'Server URL: your Tailscale IP and port\n'
-                  'e.g. http://100.64.0.1:8000\n\n'
-                  'API Key: the key stored in\n'
-                  '~/.config/atlas/api_key on your computer',
-                  style: TextStyle(
-                    color:    Color(0xFF4a5a6a),
-                    fontSize: 12,
-                    height:   1.6,
-                  ),
-                ),
-
-
                 const SizedBox(height: 32),
 
-                // Danger zone
-                const Text(
-                  'DANGER ZONE',
-                  style: TextStyle(
-                    color:         Color(0xFFcc2200),
-                    fontSize:      11,
-                    fontWeight:    FontWeight.bold,
-                    letterSpacing: 1.5,
-                  ),
-                ),
+                // ---- Section: Danger zone ----
+                _sectionLabel('DANGER ZONE', color: const Color(0xFFcc2200)),
                 const SizedBox(height: 8),
+
                 SizedBox(
                   width: double.infinity,
                   child: OutlinedButton(
@@ -256,6 +298,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
 
+                const SizedBox(height: 32),
               ],
             ),
           ),
@@ -264,19 +307,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+
+  Widget _sectionLabel(String text, {Color color = const Color(0xFF1a6aff)}) {
+    return Text(
+      text,
+      style: TextStyle(
+        color:         color,
+        fontSize:      11,
+        fontWeight:    FontWeight.bold,
+        letterSpacing: 1.5,
+      ),
+    );
+  }
+
   InputDecoration _inputDecoration({
-    required String label,
-    required String hint,
+    required String   label,
+    required String   hint,
     required IconData icon,
   }) {
     return InputDecoration(
-      labelText:     label,
-      hintText:      hint,
-      labelStyle:    const TextStyle(color: Color(0xFF8a9ab8)),
-      hintStyle:     const TextStyle(color: Color(0xFF4a5a6a)),
-      prefixIcon:    Icon(icon, color: const Color(0xFF8a9ab8)),
-      filled:        true,
-      fillColor:     const Color(0xFF1a1a2e),
+      labelText:  label,
+      hintText:   hint,
+      labelStyle: const TextStyle(color: Color(0xFF8a9ab8)),
+      hintStyle:  const TextStyle(color: Color(0xFF4a5a6a)),
+      prefixIcon: Icon(icon, color: const Color(0xFF8a9ab8)),
+      filled:     true,
+      fillColor:  const Color(0xFF1a1a2e),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
         borderSide:   const BorderSide(color: Color(0xFF2a2a4e)),
@@ -292,6 +351,91 @@ class _SettingsScreenState extends State<SettingsScreen> {
       errorBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
         borderSide:   const BorderSide(color: Color(0xFFcc2200)),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// QR Scan Screen
+// ---------------------------------------------------------------------------
+
+class _QrScanScreen extends StatefulWidget {
+  const _QrScanScreen();
+
+  @override
+  State<_QrScanScreen> createState() => _QrScanScreenState();
+}
+
+class _QrScanScreenState extends State<_QrScanScreen> {
+  final MobileScannerController _controller = MobileScannerController();
+  bool _scanned = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onDetect(BarcodeCapture capture) {
+    if (_scanned) return;
+    final value = capture.barcodes.firstOrNull?.rawValue;
+    if (value != null && value.isNotEmpty) {
+      _scanned = true;
+      _controller.stop();
+      Navigator.pop(context, value);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF0a0a0f),
+        title: const Text(
+          'Scan API Key QR',
+          style: TextStyle(color: Color(0xFFc8d8e8)),
+        ),
+        iconTheme: const IconThemeData(color: Color(0xFF8a9ab8)),
+      ),
+      body: Stack(
+        children: [
+          MobileScanner(
+            controller: _controller,
+            onDetect:   _onDetect,
+          ),
+
+          // Overlay guide box
+          Center(
+            child: Container(
+              width:  260,
+              height: 260,
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: const Color(0xFF1a6aff),
+                  width: 2,
+                ),
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+
+          // Hint text
+          Positioned(
+            bottom: 60,
+            left:   0,
+            right:  0,
+            child: const Text(
+              'Point at the QR code on your computer screen',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color:    Color(0xFFc8d8e8),
+                fontSize: 14,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
