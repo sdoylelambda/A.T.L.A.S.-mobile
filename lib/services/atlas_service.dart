@@ -107,7 +107,7 @@ class AtlasService {
             },
             body: jsonEncode({'text': text}),
           )
-          .timeout(const Duration(seconds: 60));
+          .timeout(const Duration(seconds: 80));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -125,8 +125,19 @@ class AtlasService {
       return AtlasResponse.error('Could not reach Atlas: $e');
     }
   }
-}
 
+Future<void> cancelCommand() async {
+    final url    = await getServerUrl();
+    final apiKey = await getApiKey();
+    if (url == null || apiKey == null) return;
+    try {
+      await http.post(
+        Uri.parse('$url/cancel'),
+        headers: {'X-API-Key': apiKey},
+      ).timeout(const Duration(seconds: 5));
+    } catch (_) {}
+  }
+}
 // ---------------------------------------------------------------------------
 // Models
 // ---------------------------------------------------------------------------
