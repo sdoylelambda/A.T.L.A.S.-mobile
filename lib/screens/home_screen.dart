@@ -219,10 +219,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
     await _stt.listen(
       onResult: (r) => setState(() => _heardText = r.recognizedWords),
-      listenFor:      const Duration(seconds: 30),
-      pauseFor:       const Duration(seconds: 2),
+      listenFor:      const Duration(seconds: 120), // holds as long as button held
+      pauseFor:       const Duration(seconds: 10),  // only auto-stop after 10s silence
       partialResults: true,
-      cancelOnError:  true,
+      cancelOnError:  false,   // ← don't kill on error_no_match
+      listenMode:     ListenMode.dictation, // ← keeps mic open longer
     );
 
     // Always-listen: auto-submit when speech pauses
