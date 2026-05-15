@@ -55,6 +55,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   bool   _muted            = false;
   String _statusText       = 'Connecting...';
   String _heardText        = '';
+  String _responseText     = '';
 
   static const _rotSpeed = 0.002;
 
@@ -258,6 +259,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _isThinking  = true;
       _statusText  = 'Thinking...';
       _heardText   = '';
+      _responseText = '';
     });
     _setOrbState('thinking');
 
@@ -272,6 +274,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _addConversation('atlas', response.text);
       _setOrbState('speaking');
       setState(() { _isSpeaking = true; _statusText = 'Speaking...'; });
+      setState(() {
+      _isThinking  = false;
+      _atlasOnline = response.success;
+      _responseText = response.text;  
+      });
       if (!_muted) {
         await _tts.speak(response.text);
       } else {
@@ -372,6 +379,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 if (_heardText.isNotEmpty) _buildHeardText(),
                 _buildStateLabel(),
                 _buildButtons(),
+                if (_heardText.isNotEmpty) _buildHeardText(),
+                if (_responseText.isNotEmpty) _buildResponseText(),
                 if (!_alwaysListen) _buildPushToTalk(),
                 const SizedBox(height: 16),
               ],
@@ -481,6 +490,23 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         textAlign: TextAlign.center,
         style: const TextStyle(color: Color(0xFF4499ff),
           fontSize: 13, fontStyle: FontStyle.italic)),
+    );
+  }
+
+  Widget _buildResponseText() {
+  return Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
+    child: Text(
+      _responseText,
+      textAlign: TextAlign.center,
+      maxLines:  4,
+      overflow:  TextOverflow.ellipsis,
+      style: const TextStyle(
+        color:    Color(0xFFc8d8e8),
+        fontSize: 14,
+        height:   1.4,
+        ),
+      ),
     );
   }
 
