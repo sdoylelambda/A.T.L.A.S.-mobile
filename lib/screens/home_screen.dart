@@ -461,6 +461,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           const Text('● LIVE',
             style: TextStyle(color: Color(0xFF00cc66), fontSize: 11,
               fontWeight: FontWeight.bold, letterSpacing: 1)),
+        GestureDetector(
+          onTap: _checkStatus,
+          child: const Icon(Icons.refresh, color: Color(0xFF4a5a6a), size: 14),
+        ),
       ]),
     );
   }
