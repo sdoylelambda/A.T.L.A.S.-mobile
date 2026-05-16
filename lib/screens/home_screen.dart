@@ -56,6 +56,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   String _statusText       = 'Connecting...';
   String _heardText        = '';
   String _responseText     = '';
+  String _finalText        = '';
 
   static const _rotSpeed = 0.002;
 
@@ -219,7 +220,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _setOrbState('listening');
 
     await _stt.listen(
-      onResult: (r) => setState(() => _heardText = r.recognizedWords),
+      onResult: (r) {
+        setState(() => _heardText = r.recognizedWords);
+        // only store final results for sending
+        if (r.finalResult) _finalText = r.recognizedWords;
+      },
       listenFor:      const Duration(seconds: 120), // holds as long as button held
       pauseFor:       const Duration(seconds: 10),  // only auto-stop after 10s silence
       partialResults: true,
@@ -240,7 +245,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Future<void> _stopListeningAndSend() async {
     await _stt.stop();
     setState(() => _isListening = false);
-    final text = _heardText.trim();
+    // new — prefer final result, fall back to partial if final is empty
+    final text = (_finalText.isNotEmpty ? _finalText : _heardText).trim();
+    _finalText = ''; // reset for next command
     if (text.isEmpty) {
       setState(() => _statusText = 'Nothing heard');
       if (_alwaysListen) Future.delayed(const Duration(seconds: 1), _startListening);
