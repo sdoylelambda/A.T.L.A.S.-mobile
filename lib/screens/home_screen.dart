@@ -269,21 +269,28 @@ Future<void> _listenOnce() async {
     if (_alwaysListen) {
       _stt.statusListener = (status) {
         if (status == 'done' || status == 'notListening') {
-          if (_heardText.trim().isNotEmpty) _stopListeningAndSend();
+          if (_accumulatedText.trim().isNotEmpty) {
+            _stopListeningAndSend();
+          } else if (_alwaysListen) {
+            Future.delayed(
+              const Duration(milliseconds: 300), _listenOnce);
+          }
         }
       };
     }
-  }
 
   Future<void> _stopListeningAndSend() async {
     await _stt.stop();
     setState(() => _isListening = false);
-    // new — prefer final result, fall back to partial if final is empty
-    final text = (_finalText.isNotEmpty ? _finalText : _heardText).trim();
-    _finalText = ''; // reset for next command
+
+    final text = _accumulatedText.trim();
+    _accumulatedText = '';
+
     if (text.isEmpty) {
       setState(() => _statusText = 'Nothing heard');
-      if (_alwaysListen) Future.delayed(const Duration(seconds: 1), _startListening);
+      if (_alwaysListen) {
+        Future.delayed(const Duration(seconds: 1), _startListening);
+      }
       return;
     }
     await _sendCommand(text);
