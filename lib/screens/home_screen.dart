@@ -26,17 +26,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   final List<ConversationEntry> _conversation  = [];
 
   // Orb state
-  List<Particle> _particles   = [];
-  String  _orbState           = 'listening';
-  String  _targetOrbState     = 'listening';
-  double  _breathPhase        = 0.0;
-  Color   _currentColor       = const Color(0xFF3366FF);
-  Color   _targetColor        = const Color(0xFF3366FF);
-  double  _currentRadius      = 1.0;
-  double  _targetRadius       = 1.0;
-  int     _targetParticleCount = 400;
-  List<(int, int, double)> _beams = [];
-  int     _beamCounter        = 0;
+  List<Particle> _particles        = [];
+  String  _orbState                = 'listening';
+  double  _breathPhase             = 0.0;
+  Color   _currentColor            = const Color(0xFF3366FF);
+  Color   _targetColor             = const Color(0xFF3366FF);
+  double  _currentRadius           = 1.0;
+  double  _targetRadius            = 1.0;
+  int     _targetParticleCount     = 400;
+  List<(int, int, double)> _beams  = [];
+  int     _beamCounter             = 0;
 
   // Animation controllers
   late AnimationController _orbTicker;
@@ -44,18 +43,20 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   late AnimationController _drawerSlide;
 
   // App state
-  bool   _atlasOnline      = false;
-  bool   _isListening      = false;
-  bool   _isThinking       = false;
-  bool   _isSpeaking       = false;
-  bool   _alwaysListen     = false;
-  bool   _sttReady         = false;
-  bool   _showTextField    = false;
-  bool   _showDrawer       = false;
-  bool   _muted            = false;
-  String _statusText       = 'Connecting...';
-  String _heardText        = '';
-  String _responseText     = '';
+  bool   _atlasOnline     = false;
+  bool   _isListening     = false;
+  bool   _isThinking      = false;
+  bool   _isSpeaking      = false;
+  bool   _alwaysListen    = false;
+  bool   _sttReady        = false;
+  bool   _showTextField   = false;
+  bool   _showDrawer      = false;
+  bool   _muted           = false;
+  bool   _holdingButton   = false;
+  String _statusText      = 'Connecting...';
+  String _heardText       = '';
+  String _responseText    = '';
+  String _accumulatedText = '';
 
   static const _rotSpeed = 0.002;
 
@@ -63,20 +64,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   void initState() {
     super.initState();
     _initParticles(400);
-
-    // Orb animation ticker — 60fps
     _orbTicker = AnimationController(vsync: this, duration: const Duration(days: 999))
       ..addListener(_tickOrb)
       ..forward();
-
-    // Text field slide animation
-    _textFieldSlide = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: 250));
-
-    // Conversation drawer slide
-    _drawerSlide = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: 300));
-
+    _textFieldSlide = AnimationController(vsync: this, duration: const Duration(milliseconds: 250));
+    _drawerSlide    = AnimationController(vsync: this, duration: const Duration(milliseconds: 300));
     _initStt();
     _initTts();
     _checkStatus();
@@ -103,17 +95,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   Future<void> _initStt() async {
     final ok = await _stt.initialize(
-  onError: (e) {
-    if (e.errorMsg == 'error_no_match' ||
-        e.errorMsg == 'error_speech_timeout' ||
-        e.errorMsg == 'error_client') {
-      // not real errors — restart if still listening
-      if (_isListening && !_isThinking) _startListening();
-      return;
-    }
-    _setStatus('STT: ${e.errorMsg}');
-  },
-);
+      onError: (e) {
+        if (e.errorMsg == 'error_no_match' ||
+            e.errorMsg == 'error_speech_timeout' ||
+            e.errorMsg == 'error_client') {
+          if (_isListening && (_holdingButton || _alwaysListen)) {
+            Future.delayed(const Duration(milliseconds: 200), _listenOnce);
+          }
+          return;
+        }
+        _setStatus('STT: ${e.errorMsg}');
+      },
+    );
     setState(() => _sttReady = ok);
   }
 
@@ -122,7 +115,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     await _tts.setSpeechRate(0.5);
     await _tts.setVolume(1.0);
     _tts.setCompletionHandler(() {
-      setState(() { _isSpeaking = false; _setOrbState('listening'); });
+      setState(() => _isSpeaking = false);
+      _setOrbState('listening');
       if (_alwaysListen) _startListening();
     });
   }
@@ -137,37 +131,26 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   // ---------------------------------------------------------------------------
-  // Orb tick — runs every frame
+  // Orb
   // ---------------------------------------------------------------------------
 
   void _tickOrb() {
     if (!mounted) return;
     setState(() {
-      // Rotate particles
       final cosA = cos(_rotSpeed);
       final sinA = sin(_rotSpeed);
       for (final p in _particles) { p.rotateY(cosA, sinA); }
-
-      // Breathe
       final cfg = kOrbStates[_orbState] ?? kOrbStates['listening']!;
       _breathPhase += cfg.breathSpeed;
       if (_breathPhase > 2 * pi) _breathPhase -= 2 * pi;
-
-      // Smooth color transition
-      _currentColor = Color.lerp(_currentColor, _targetColor, 0.04)!;
-
-      // Smooth radius
+      _currentColor  = Color.lerp(_currentColor, _targetColor, 0.04)!;
       _currentRadius += (_targetRadius - _currentRadius) * 0.03;
-
-      // Particle count transition
       if (_particles.length < _targetParticleCount) {
         final add = min(10, _targetParticleCount - _particles.length);
         _particles.addAll(List.generate(add, (_) => Particle.random(_rng)));
       } else if (_particles.length > _targetParticleCount) {
         _particles.removeRange(_targetParticleCount, _particles.length);
       }
-
-      // Recompute beams every 5 frames
       _beamCounter++;
       if (_beamCounter % 5 == 0) _computeBeams();
     });
@@ -185,27 +168,26 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   void _computeBeams() {
-    final cfg     = kOrbStates[_orbState] ?? kOrbStates['listening']!;
-    final subset  = _particles.take(150).toList();
-    final newBeams = <(int, int, double)>[];
+    final cfg    = kOrbStates[_orbState] ?? kOrbStates['listening']!;
+    final subset = _particles.take(150).toList();
+    final beams  = <(int, int, double)>[];
     for (int i = 0; i < subset.length; i++) {
       for (int j = i + 1; j < subset.length; j++) {
         final dx = subset[i].x - subset[j].x;
         final dy = subset[i].y - subset[j].y;
         final dz = subset[i].z - subset[j].z;
-        final d  = sqrt(dx*dx + dy*dy + dz*dz);
+        final d  = sqrt(dx * dx + dy * dy + dz * dz);
         if (d < cfg.lineMaxDist) {
-          final alpha = (1.0 - d / cfg.lineMaxDist) * cfg.lineMaxAlpha;
-          newBeams.add((i, j, alpha));
+          beams.add((i, j, (1.0 - d / cfg.lineMaxDist) * cfg.lineMaxAlpha));
         }
       }
     }
-    newBeams.shuffle(_rng);
-    _beams = newBeams.take(newBeams.length ~/ 5).toList();
+    beams.shuffle(_rng);
+    _beams = beams.take(beams.length ~/ 5).toList();
   }
 
   // ---------------------------------------------------------------------------
-  // STT
+  // STT — chunked accumulation to work around Android 5s hard limit
   // ---------------------------------------------------------------------------
 
   Future<void> _startListening() async {
@@ -217,33 +199,69 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _statusText  = 'Listening...';
     });
     _setOrbState('listening');
+    await _listenOnce();
+  }
+
+  Future<void> _listenOnce() async {
+    if (!_isListening) return;
 
     await _stt.listen(
-      onResult: (r) => setState(() => _heardText = r.recognizedWords),
-      listenFor:      const Duration(seconds: 120), // holds as long as button held
-      pauseFor:       const Duration(seconds: 10),  // only auto-stop after 10s silence
+      onResult: (r) {
+        setState(() {
+          _heardText = (_accumulatedText + ' ' + r.recognizedWords).trim();
+        });
+        if (r.finalResult && r.recognizedWords.isNotEmpty) {
+          _accumulatedText = (_accumulatedText + ' ' + r.recognizedWords).trim();
+        }
+      },
+      listenFor:      const Duration(seconds: 10),
+      pauseFor:       const Duration(seconds: 5),
       partialResults: true,
-      cancelOnError:  false,   // ← don't kill on error_no_match
-      listenMode:     ListenMode.dictation, // ← keeps mic open longer
+      cancelOnError:  false,
+      listenMode:     ListenMode.dictation,
     );
 
-    // Always-listen: auto-submit when speech pauses
-    if (_alwaysListen) {
+    // always-listen: auto-submit after silence
+    if (_alwaysListen && _isListening) {
       _stt.statusListener = (status) {
         if (status == 'done' || status == 'notListening') {
-          if (_heardText.trim().isNotEmpty) _stopListeningAndSend();
+          if (_accumulatedText.trim().isNotEmpty) {
+            _stopListeningAndSend();
+          } else {
+            Future.delayed(const Duration(milliseconds: 300), _listenOnce);
+          }
         }
       };
+    }
+
+    // push-to-talk: restart chunk if button still held
+    if (_holdingButton && _isListening) {
+      await Future.delayed(const Duration(milliseconds: 100));
+      await _listenOnce();
     }
   }
 
   Future<void> _stopListeningAndSend() async {
     await _stt.stop();
     setState(() => _isListening = false);
-    final text = _heardText.trim();
+    final text       = _accumulatedText.trim();
+    _accumulatedText = '';
     if (text.isEmpty) {
       setState(() => _statusText = 'Nothing heard');
       if (_alwaysListen) Future.delayed(const Duration(seconds: 1), _startListening);
+      return;
+    }
+    await _sendCommand(text);
+  }
+
+  Future<void> _releaseButton() async {
+    _holdingButton   = false;
+    await _stt.stop();
+    setState(() => _isListening = false);
+    final text       = _accumulatedText.trim();
+    _accumulatedText = '';
+    if (text.isEmpty) {
+      setState(() => _statusText = 'Nothing heard');
       return;
     }
     await _sendCommand(text);
@@ -256,9 +274,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Future<void> _sendCommand(String text) async {
     _addConversation('you', text);
     setState(() {
-      _isThinking  = true;
-      _statusText  = 'Thinking...';
-      _heardText   = '';
+      _isThinking   = true;
+      _statusText   = 'Thinking...';
+      _heardText    = '';
       _responseText = '';
     });
     _setOrbState('thinking');
@@ -266,43 +284,49 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final response = await _atlas.sendCommand(text);
 
     setState(() {
-      _isThinking = false;
+      _isThinking  = false;
       _atlasOnline = response.success;
     });
 
     if (response.success) {
       _addConversation('atlas', response.text);
-      _setOrbState('speaking');
-      setState(() { _isSpeaking = true; _statusText = 'Speaking...'; });
       setState(() {
-      _isThinking  = false;
-      _atlasOnline = response.success;
-      _responseText = response.text;  
+        _responseText = response.text;
+        _isSpeaking   = true;
+        _statusText   = 'Speaking...';
       });
+      _setOrbState('speaking');
       if (!_muted) {
         await _tts.speak(response.text);
       } else {
-        setState(() { _isSpeaking = false; _setOrbState('listening'); });
+        setState(() => _isSpeaking = false);
+        _setOrbState('listening');
         if (_alwaysListen) _startListening();
       }
     } else {
       _setOrbState('error');
-      setState(() => _statusText = 'Error');
+      setState(() {
+        _statusText   = 'Error';
+        _responseText = response.text;
+      });
       _addConversation('atlas', response.text);
       Future.delayed(const Duration(seconds: 2), () => _setOrbState('listening'));
     }
   }
 
   Future<void> _cancel() async {
+    _holdingButton   = false;
+    _accumulatedText = '';
     await _stt.stop();
     await _tts.stop();
     await _atlas.cancelCommand();
     setState(() {
-      _isListening = false;
-      _isThinking  = false;
-      _isSpeaking  = false;
-      _statusText  = 'Cancelled';
-      _heardText   = '';
+      _isListening  = false;
+      _isThinking   = false;
+      _isSpeaking   = false;
+      _statusText   = 'Cancelled';
+      _heardText    = '';
+      _responseText = '';
     });
     _setOrbState('listening');
     Future.delayed(const Duration(seconds: 1), () {
@@ -320,7 +344,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         _drawerScroll.animateTo(
           _drawerScroll.position.maxScrollExtent,
           duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
+          curve:    Curves.easeOut,
         );
       }
     });
@@ -346,8 +370,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   void _toggleAlwaysListen() {
     setState(() => _alwaysListen = !_alwaysListen);
-    if (_alwaysListen) _startListening();
-    else _stt.stop();
+    if (_alwaysListen) { _accumulatedText = ''; _startListening(); }
+    else { _stt.stop(); setState(() => _isListening = false); }
   }
 
   void _toggleMute() => setState(() => _muted = !_muted);
@@ -376,20 +400,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               children: [
                 _buildStatusBar(),
                 Expanded(child: _buildOrb()),
-                if (_heardText.isNotEmpty) _buildHeardText(),
+                if (_heardText.isNotEmpty)    _buildHeardText(),
+                if (_responseText.isNotEmpty) _buildResponseText(),
                 _buildStateLabel(),
                 _buildButtons(),
-                if (_heardText.isNotEmpty) _buildHeardText(),
-                if (_responseText.isNotEmpty) _buildResponseText(),
                 if (!_alwaysListen) _buildPushToTalk(),
                 const SizedBox(height: 16),
               ],
             ),
-
-            // Conversation drawer — slides up from bottom
-            if (_showDrawer) _buildDrawer(),
-
-            // Text field — slides up from bottom
+            if (_showDrawer)    _buildDrawer(),
             if (_showTextField) _buildTextField(),
           ],
         ),
@@ -401,38 +420,28 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     return AppBar(
       backgroundColor: const Color(0xFF0a0a0f),
       title: const Text('A.T.L.A.S.',
-        style: TextStyle(color: Color(0xFF1a6aff),
-          fontWeight: FontWeight.bold, letterSpacing: 4)),
+        style: TextStyle(color: Color(0xFF1a6aff), fontWeight: FontWeight.bold, letterSpacing: 4)),
       actions: [
-        // Conversation history
         IconButton(
           icon: Icon(Icons.chat_bubble_outline,
             color: _showDrawer ? const Color(0xFF1a6aff) : const Color(0xFF8a9ab8)),
-          tooltip: 'Conversation',
-          onPressed: _toggleDrawer,
+          tooltip: 'Conversation', onPressed: _toggleDrawer,
         ),
-        // Always listen toggle
         IconButton(
-          icon: Icon(
-            _alwaysListen ? Icons.hearing : Icons.hearing_disabled,
-            color: _alwaysListen ? const Color(0xFF00cc66) : const Color(0xFF8a9ab8),
-          ),
+          icon: Icon(_alwaysListen ? Icons.hearing : Icons.hearing_disabled,
+            color: _alwaysListen ? const Color(0xFF00cc66) : const Color(0xFF8a9ab8)),
           tooltip: _alwaysListen ? 'Always listen ON' : 'Always listen OFF',
           onPressed: _toggleAlwaysListen,
         ),
-        // Mute
         IconButton(
           icon: Icon(_muted ? Icons.volume_off : Icons.volume_up,
             color: _muted ? const Color(0xFFcc2200) : const Color(0xFF8a9ab8)),
-          tooltip: _muted ? 'Unmute' : 'Mute TTS',
-          onPressed: _toggleMute,
+          tooltip: _muted ? 'Unmute' : 'Mute TTS', onPressed: _toggleMute,
         ),
-        // Settings
         IconButton(
           icon: const Icon(Icons.settings, color: Color(0xFF8a9ab8)),
           onPressed: () async {
-            await Navigator.push(context,
-              MaterialPageRoute(builder: (_) => const SettingsScreen()));
+            await Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
             _checkStatus();
           },
         ),
@@ -442,9 +451,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   Widget _buildStatusBar() {
     return Container(
-      width:   double.infinity,
+      width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      color:   const Color(0xFF1a1a2e),
+      color: const Color(0xFF1a1a2e),
       child: Row(children: [
         Container(
           width: 7, height: 7,
@@ -454,16 +463,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ),
         ),
         const SizedBox(width: 8),
-        Text(_statusText,
-          style: const TextStyle(color: Color(0xFF8a9ab8), fontSize: 12)),
+        Text(_statusText, style: const TextStyle(color: Color(0xFF8a9ab8), fontSize: 12)),
         const Spacer(),
         if (_alwaysListen)
-          const Text('● LIVE',
-            style: TextStyle(color: Color(0xFF00cc66), fontSize: 11,
-              fontWeight: FontWeight.bold, letterSpacing: 1)),
+          const Padding(
+            padding: EdgeInsets.only(right: 8),
+            child: Text('● LIVE',
+              style: TextStyle(color: Color(0xFF00cc66), fontSize: 11,
+                fontWeight: FontWeight.bold, letterSpacing: 1)),
+          ),
         GestureDetector(
           onTap: _checkStatus,
-          child: const Icon(Icons.refresh, color: Color(0xFF4a5a6a), size: 14),
+          child: const Icon(Icons.refresh, color: Color(0xFF4a5a6a), size: 16),
         ),
       ]),
     );
@@ -474,12 +485,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       child: RepaintBoundary(
         child: CustomPaint(
           painter: OrbPainter(
-            particles:     _particles,
-            state:         _orbState,
-            breathPhase:   _breathPhase,
-            currentColor:  _currentColor,
-            currentRadius: _currentRadius,
-            beams:         _beams,
+            particles: _particles, state: _orbState,
+            breathPhase: _breathPhase, currentColor: _currentColor,
+            currentRadius: _currentRadius, beams: _beams,
           ),
           size: const Size(280, 280),
         ),
@@ -489,51 +497,31 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   Widget _buildHeardText() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 2),
       child: Text('"$_heardText"',
-        textAlign: TextAlign.center,
-        style: const TextStyle(color: Color(0xFF4499ff),
-          fontSize: 13, fontStyle: FontStyle.italic)),
+        textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis,
+        style: const TextStyle(color: Color(0xFF4499ff), fontSize: 13, fontStyle: FontStyle.italic)),
     );
   }
 
   Widget _buildResponseText() {
-  return Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
-    child: Text(
-      _responseText,
-      textAlign: TextAlign.center,
-      maxLines:  4,
-      overflow:  TextOverflow.ellipsis,
-      style: const TextStyle(
-        color:    Color(0xFFc8d8e8),
-        fontSize: 14,
-        height:   1.4,
-        ),
-      ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 2),
+      child: Text(_responseText,
+        textAlign: TextAlign.center, maxLines: 4, overflow: TextOverflow.ellipsis,
+        style: const TextStyle(color: Color(0xFFc8d8e8), fontSize: 14, height: 1.4)),
     );
   }
 
   Widget _buildStateLabel() {
-    final labels = {
-      'listening': '● Listening ●',
-      'thinking':  '● Thinking ●',
-      'speaking':  '● Speaking ●',
-      'error':     '● Error ●',
-      'sleeping':  '● Sleeping ●',
-    };
-    final colors = {
-      'listening': const Color(0xFF3a6aee),
-      'thinking':  const Color(0xFF3aee6a),
-      'speaking':  const Color(0xFF66ccff),
-      'error':     const Color(0xFFee3a3a),
-      'sleeping':  const Color(0xFFeec83a),
-    };
+    const labels = {'listening':'● Listening ●','thinking':'● Thinking ●',
+      'speaking':'● Speaking ●','error':'● Error ●','sleeping':'● Sleeping ●'};
+    const colors = {'listening':Color(0xFF3a6aee),'thinking':Color(0xFF3aee6a),
+      'speaking':Color(0xFF66ccff),'error':Color(0xFFee3a3a),'sleeping':Color(0xFFeec83a)};
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Text(labels[_orbState] ?? '',
-        style: TextStyle(
-          color: colors[_orbState] ?? const Color(0xFF4a5a6a),
+        style: TextStyle(color: colors[_orbState] ?? const Color(0xFF4a5a6a),
           fontSize: 11, letterSpacing: 1)),
     );
   }
@@ -542,12 +530,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Row(children: [
-        // Cancel
         Expanded(
           child: OutlinedButton.icon(
             onPressed: _cancel,
-            icon: const Icon(Icons.stop, size: 16),
-            label: const Text('Cancel'),
+            icon: const Icon(Icons.stop, size: 16), label: const Text('Cancel'),
             style: OutlinedButton.styleFrom(
               foregroundColor: const Color(0xFFff6b6b),
               side: const BorderSide(color: Color(0xFF8e2a2a)),
@@ -556,7 +542,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ),
         ),
         const SizedBox(width: 8),
-        // Keyboard / text input
         Expanded(
           child: OutlinedButton.icon(
             onPressed: _toggleTextField,
@@ -577,37 +562,28 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: GestureDetector(
-        onTapDown:   (_) => _startListening(),
-        onTapUp:     (_) => _stopListeningAndSend(),
-        onTapCancel: ()  => _stopListeningAndSend(),
+        onTapDown:   (_) { _holdingButton = true; _accumulatedText = ''; _startListening(); },
+        onTapUp:     (_) => _releaseButton(),
+        onTapCancel: ()  => _releaseButton(),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
           width: double.infinity,
           padding: const EdgeInsets.symmetric(vertical: 14),
           decoration: BoxDecoration(
-            color: _isListening
-              ? const Color(0xFF1a3a6e)
-              : const Color(0xFF1a1a2e),
+            color: _isListening ? const Color(0xFF1a3a6e) : const Color(0xFF1a1a2e),
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
-              color: _isListening
-                ? const Color(0xFF1a6aff)
-                : const Color(0xFF2a2a4e),
+              color: _isListening ? const Color(0xFF1a6aff) : const Color(0xFF2a2a4e),
               width: _isListening ? 2 : 1,
             ),
           ),
           child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
             Icon(_isListening ? Icons.mic : Icons.mic_none,
-              color: _isListening
-                ? const Color(0xFF1a6aff)
-                : const Color(0xFF8a9ab8),
-              size: 20),
+              color: _isListening ? const Color(0xFF1a6aff) : const Color(0xFF8a9ab8), size: 20),
             const SizedBox(width: 8),
             Text(_isListening ? 'Release to send' : 'Hold to speak',
               style: TextStyle(
-                color: _isListening
-                  ? const Color(0xFF4499ff)
-                  : const Color(0xFF4a5a6a),
+                color: _isListening ? const Color(0xFF4499ff) : const Color(0xFF4a5a6a),
                 fontSize: 14)),
           ]),
         ),
@@ -629,22 +605,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             border: Border(top: BorderSide(color: Color(0xFF2a2a4e))),
           ),
           child: Column(children: [
-            // Handle bar
             Container(
               margin: const EdgeInsets.symmetric(vertical: 8),
               width: 36, height: 4,
-              decoration: BoxDecoration(
-                color: const Color(0xFF2a2a4e),
+              decoration: BoxDecoration(color: const Color(0xFF2a2a4e),
                 borderRadius: BorderRadius.circular(2)),
             ),
             const Text('Conversation',
-              style: TextStyle(color: Color(0xFF4a5a6a), fontSize: 12,
-                letterSpacing: 1)),
-            Expanded(
-              child: ConversationDrawer(
-                entries: _conversation,
-              ),
-            ),
+              style: TextStyle(color: Color(0xFF4a5a6a), fontSize: 12, letterSpacing: 1)),
+            Expanded(child: ConversationDrawer(entries: _conversation)),
           ]),
         ),
       ),
@@ -670,26 +639,21 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           child: Row(children: [
             Expanded(
               child: TextField(
-                controller:    _textController,
-                autofocus:     true,
-                style:         const TextStyle(color: Color(0xFFc8d8e8)),
+                controller: _textController, autofocus: true,
+                style: const TextStyle(color: Color(0xFFc8d8e8)),
                 decoration: const InputDecoration(
-                  hintText:  'Type a command...',
+                  hintText: 'Type a command...',
                   hintStyle: TextStyle(color: Color(0xFF4a5a6a)),
-                  filled:    true,
-                  fillColor: Color(0xFF1a1a2e),
+                  filled: true, fillColor: Color(0xFF1a1a2e),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.all(Radius.circular(8)),
-                    borderSide:   BorderSide(color: Color(0xFF2a2a4e)),
-                  ),
+                    borderSide: BorderSide(color: Color(0xFF2a2a4e))),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.all(Radius.circular(8)),
-                    borderSide:   BorderSide(color: Color(0xFF2a2a4e)),
-                  ),
+                    borderSide: BorderSide(color: Color(0xFF2a2a4e))),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.all(Radius.circular(8)),
-                    borderSide:   BorderSide(color: Color(0xFF1a6aff)),
-                  ),
+                    borderSide: BorderSide(color: Color(0xFF1a6aff))),
                   contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 ),
                 onSubmitted: (_) => _submitText(),
