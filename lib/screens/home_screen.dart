@@ -55,6 +55,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   bool   _muted            = false;
   String _statusText       = 'Connecting...';
   String _heardText        = '';
+  String _responseText     = '';
 
   static const _rotSpeed = 0.002;
 
@@ -101,7 +102,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   Future<void> _initStt() async {
-    final ok = await _stt.initialize(onError: (e) => _setStatus('STT: ${e.errorMsg}'));
+    final ok = await _stt.initialize(
+  onError: (e) {
+    if (e.errorMsg == 'error_no_match' ||
+        e.errorMsg == 'error_speech_timeout' ||
+        e.errorMsg == 'error_client') {
+      // not real errors — restart if still listening
+      if (_isListening && !_isThinking) _startListening();
+      return;
+    }
+    _setStatus('STT: ${e.errorMsg}');
+  },
+);
     setState(() => _sttReady = ok);
   }
 
@@ -208,10 +220,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
     await _stt.listen(
       onResult: (r) => setState(() => _heardText = r.recognizedWords),
-      listenFor:      const Duration(seconds: 30),
-      pauseFor:       const Duration(seconds: 2),
+      listenFor:      const Duration(seconds: 120), // holds as long as button held
+      pauseFor:       const Duration(seconds: 10),  // only auto-stop after 10s silence
       partialResults: true,
-      cancelOnError:  true,
+      cancelOnError:  false,   // ← don't kill on error_no_match
+      listenMode:     ListenMode.dictation, // ← keeps mic open longer
     );
 
     // Always-listen: auto-submit when speech pauses
@@ -246,6 +259,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _isThinking  = true;
       _statusText  = 'Thinking...';
       _heardText   = '';
+      _responseText = '';
     });
     _setOrbState('thinking');
 
@@ -260,6 +274,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _addConversation('atlas', response.text);
       _setOrbState('speaking');
       setState(() { _isSpeaking = true; _statusText = 'Speaking...'; });
+      setState(() {
+      _isThinking  = false;
+      _atlasOnline = response.success;
+      _responseText = response.text;  
+      });
       if (!_muted) {
         await _tts.speak(response.text);
       } else {
@@ -360,6 +379,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 if (_heardText.isNotEmpty) _buildHeardText(),
                 _buildStateLabel(),
                 _buildButtons(),
+                if (_heardText.isNotEmpty) _buildHeardText(),
+                if (_responseText.isNotEmpty) _buildResponseText(),
                 if (!_alwaysListen) _buildPushToTalk(),
                 const SizedBox(height: 16),
               ],
@@ -440,6 +461,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           const Text('● LIVE',
             style: TextStyle(color: Color(0xFF00cc66), fontSize: 11,
               fontWeight: FontWeight.bold, letterSpacing: 1)),
+        GestureDetector(
+          onTap: _checkStatus,
+          child: const Icon(Icons.refresh, color: Color(0xFF4a5a6a), size: 14),
+        ),
       ]),
     );
   }
@@ -469,6 +494,23 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         textAlign: TextAlign.center,
         style: const TextStyle(color: Color(0xFF4499ff),
           fontSize: 13, fontStyle: FontStyle.italic)),
+    );
+  }
+
+  Widget _buildResponseText() {
+  return Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
+    child: Text(
+      _responseText,
+      textAlign: TextAlign.center,
+      maxLines:  4,
+      overflow:  TextOverflow.ellipsis,
+      style: const TextStyle(
+        color:    Color(0xFFc8d8e8),
+        fontSize: 14,
+        height:   1.4,
+        ),
+      ),
     );
   }
 
