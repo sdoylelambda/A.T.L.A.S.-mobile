@@ -106,17 +106,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   Future<void> _initStt() async {
     final ok = await _stt.initialize(
-  onError: (e) {
-    if (e.errorMsg == 'error_no_match' ||
-        e.errorMsg == 'error_speech_timeout' ||
-        e.errorMsg == 'error_client') {
-      // not real errors — restart if still listening
-      if (_isListening && !_isThinking) _startListening();
-      return;
-    }
-    _setStatus('STT: ${e.errorMsg}');
-  },
-);
+      onError: (e) {
+        if (e.errorMsg == 'error_no_match'      ||
+            e.errorMsg == 'error_speech_timeout' ||
+            e.errorMsg == 'error_client') {
+          // restart chunk if still listening
+          if (_isListening && (_holdingButton || _alwaysListen)) {
+            Future.delayed(const Duration(milliseconds: 200), _listenOnce);
+          }
+          return;
+        }
+        _setStatus('STT: ${e.errorMsg}');
+      },
+    );
     setState(() => _sttReady = ok);
   }
 
