@@ -57,6 +57,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   String _heardText        = '';
   String _responseText     = '';
   String _finalText        = '';
+  String _accumulatedText  = ''; // builds up across restarts (5 second Samsung built-in)
+  bool   _holdingButton    = false;
 
   static const _rotSpeed = 0.002;
 
@@ -210,14 +212,43 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   // ---------------------------------------------------------------------------
 
   Future<void> _startListening() async {
-    if (!_sttReady || _isThinking || _isSpeaking) return;
-    await _tts.stop();
-    setState(() {
-      _isListening = true;
-      _heardText   = '';
-      _statusText  = 'Listening...';
-    });
-    _setOrbState('listening');
+  if (!_sttReady || _isThinking || _isSpeaking) return;
+  await _tts.stop();
+  setState(() {
+    _isListening = true;
+    _heardText   = '';
+    _statusText  = 'Listening...';
+  });
+  _setOrbState('listening');
+  await _listenOnce();
+}
+
+Future<void> _listenOnce() async {
+  if (!_isListening) return;
+
+  await _stt.listen(
+    onResult: (r) {
+      setState(() {
+        // show accumulated + current chunk
+        _heardText = (_accumulatedText + ' ' + r.recognizedWords).trim();
+      });
+      if (r.finalResult && r.recognizedWords.isNotEmpty) {
+        _accumulatedText = (_accumulatedText + ' ' + r.recognizedWords).trim();
+      }
+    },
+    listenFor:      const Duration(seconds: 10),
+    pauseFor:       const Duration(seconds: 5),
+    partialResults: true,
+    cancelOnError:  false,
+    listenMode:     ListenMode.dictation,
+  );
+
+  // auto-restart if button still held or always-listen active
+  if (_isListening && (_holdingButton || _alwaysListen)) {
+    await Future.delayed(const Duration(milliseconds: 100));
+    await _listenOnce();
+  }
+}
 
     await _stt.listen(
       onResult: (r) {
@@ -316,6 +347,21 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       if (mounted) setState(() => _statusText = 'Ready');
       if (_alwaysListen) _startListening();
     });
+  }
+
+  Future<void> _releaseButton() async {
+    _holdingButton = false;
+    await _stt.stop();
+    setState(() => _isListening = false);
+
+    final text = _accumulatedText.trim();
+    _accumulatedText = '';
+
+    if (text.isEmpty) {
+      setState(() => _statusText = 'Nothing heard');
+      return;
+    }
+    await _sendCommand(text);
   }
 
   void _addConversation(String role, String text) {
@@ -584,9 +630,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: GestureDetector(
-        onTapDown:   (_) => _startListening(),
-        onTapUp:     (_) => _stopListeningAndSend(),
-        onTapCancel: ()  => _stopListeningAndSend(),
+        onTapDown: (_) {
+        _holdingButton   = true;
+        _accumulatedText = '';
+        _startListening();
+      },
+      onTapUp:     (_) => _releaseButton(),
+      onTapCancel: ()  => _releaseButton(),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
           width: double.infinity,
