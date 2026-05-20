@@ -42,10 +42,25 @@ sudo systemctl start atlas-api
 
 ### Phone setup (one time)
 
-**1. Install the app**
+**1. Install Flutter and build the APK**
 ```bash
+# install Flutter
+sudo snap install flutter --classic
+export PATH="$PATH:/home/$USER/snap/flutter/common/flutter/bin"
+echo 'export PATH="$PATH:/home/$USER/snap/flutter/common/flutter/bin"' >> ~/.bashrc
+
+# install Android SDK via Android Studio
+sudo snap install android-studio --classic
+# launch Android Studio once to complete SDK setup, then:
+flutter config --android-sdk ~/Android/Sdk
+flutter doctor --android-licenses  # accept all
+
+# build APK
 cd ~/dev/atlas_mobile
+flutter pub get
 flutter build apk --release
+
+# install on phone (USB connected)
 adb install build/app/outputs/flutter-apk/app-release.apk
 ```
 
@@ -54,8 +69,8 @@ adb install build/app/outputs/flutter-apk/app-release.apk
 python3 ~/dev/A.T.L.A.S./api/gen_qr.py
 ```
 
-**3. In the app**
-- Open Atlas → tap Settings (gear icon)
+**3. Configure the app**
+- Open Atlas mobile → tap Settings (gear icon)
 - Server URL: `http://<tailscale-ip>:8000`
 - API Key: tap QR icon → scan QR code on screen
 - Tap Save
@@ -63,39 +78,37 @@ python3 ~/dev/A.T.L.A.S./api/gen_qr.py
 **4. Grant permissions on phone**
 Settings → Apps → atlas_mobile → Permissions
 → Microphone → Allow
-→ Camera → Allow  (for QR scanning)
+→ Camera → Allow
 
-### Wireless development
+### Wireless development (no cable needed)
 ```bash
-# connect phone wirelessly for cable-free flutter run
+# with phone plugged in via USB first:
 adb tcpip 5555
-adb connect <phone-local-ip>:5555
+adb shell ip route | awk '{print $9}'  # get phone IP
+adb connect <phone-ip>:5555
+# unplug cable — flutter run now works over WiFi
 flutter run
 ```
 
-### Files added
-A.T.L.A.S/
-└── api/
-├── fastapi_server.py     # FastAPI server
-├── gen_qr.py             # API key QR generator
-└── atlas-api.service     # systemd auto-start
-atlas_mobile/
-└── lib/
-├── main.dart
-├── screens/
-│   ├── home_screen.dart
-│   └── settings_screen.dart
-└── services/
-└── atlas_service.dart
+### Mobile app features
+- Hold-to-speak orb with particle animation
+- Full conversation history (slide-up drawer)
+- Always-listen mode with auto-submit on silence
+- Type commands via slide-up text field
+- Cancel in-progress commands instantly
+- Mute TTS independently
+- QR code API key setup — no typing
+- Orb states mirror desktop: listening / thinking / speaking / error / sleeping
 
 ### API endpoints
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
 | GET | `/status` | None | Atlas running state |
 | POST | `/command` | X-API-Key | Send command, get response |
+| POST | `/cancel` | X-API-Key | Cancel current command |
 
-### Roadmap
-- Always-listen mode
-- Response streaming (token by token)
-- iOS support
-- Push notifications for email alerts
+### Security
+- API key stored in `~/.config/atlas/api_key` (chmod 600, never in repo)
+- Flutter stores credentials in Android Keystore via flutter_secure_storage
+- All traffic encrypted by Tailscale
+- Service runs as your user, not root
