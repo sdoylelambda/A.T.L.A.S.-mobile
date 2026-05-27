@@ -109,6 +109,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  // Add in settings under SSH section --- DO I WANT THIS HERE???
+const SizedBox(height: 12),
+FutureBuilder<String?>(
+  future: SshKeyManager.getPublicKeyLine(),
+  builder: (ctx, snap) {
+    if (snap.data == null) return const SizedBox.shrink();
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: () => Navigator.push(context,
+          MaterialPageRoute(builder: (_) => const SetupScreen())),
+        icon: const Icon(Icons.key, size: 16),
+        label: const Text('View / re-add SSH public key'),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: const Color(0xFF8a9ab8),
+          side: const BorderSide(color: Color(0xFF2a2a4e)),
+          padding: const EdgeInsets.symmetric(vertical: 12),
+        ),
+      ),
+    );
+  },
+),
+
   // ---------------------------------------------------------------------------
   // QR Scanner
   // ---------------------------------------------------------------------------
