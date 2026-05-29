@@ -122,13 +122,134 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   Future<void> _checkStatus() async {
-    final status = await _atlas.getStatus();
-    setState(() {
-      _atlasOnline = status.isRunning;
-      _statusText  = status.isRunning ? 'Ready' : status.state;
-    });
-    if (!status.isRunning) _setOrbState('error');
+  if (!mounted) return;
+
+  Future<String?> _showPasswordDialog() async {
+  final controller = TextEditingController();
+  bool obscure = true;
+  String? result;
+ 
+  try {
+    result = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlgState) => AlertDialog(
+          backgroundColor: const Color(0xFF1a1a2e),
+          title: const Text('A.T.L.A.S.',
+            style: TextStyle(
+              color:         Color(0xFF1a6aff),
+              fontWeight:    FontWeight.bold,
+              letterSpacing: 3)),
+          content: Column(
+            mainAxisSize:      MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Enter your computer password to start Atlas.',
+                style: TextStyle(
+                  color:    Color(0xFF8a9ab8),
+                  fontSize: 13,
+                  height:   1.4)),
+              const SizedBox(height: 16),
+              TextField(
+                controller:  controller,
+                obscureText: obscure,
+                autofocus:   true,
+                style: const TextStyle(color: Color(0xFFc8d8e8)),
+                decoration: InputDecoration(
+                  hintText:  'Linux password',
+                  hintStyle: const TextStyle(color: Color(0xFF4a5a6a)),
+                  filled:    true,
+                  fillColor: const Color(0xFF0a0a0f),
+                  border: const OutlineInputBorder(
+                    borderSide: BorderSide(color: Color(0xFF2a2a4e))),
+                  enabledBorder: const OutlineInputBorder(
+                    borderSide: BorderSide(color: Color(0xFF2a2a4e))),
+                  focusedBorder: const OutlineInputBorder(
+                    borderSide: BorderSide(color: Color(0xFF1a6aff))),
+                  prefixIcon: const Icon(Icons.lock,
+                    color: Color(0xFF8a9ab8)),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      obscure ? Icons.visibility : Icons.visibility_off,
+                      color: const Color(0xFF8a9ab8)),
+                    onPressed: () =>
+                      setDlgState(() => obscure = !obscure),
+                  ),
+                ),
+                onSubmitted: (v) => Navigator.pop(ctx, v),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                '🔒 Password + SSH key = two-factor security',
+                style: TextStyle(
+                  color:    Color(0xFF4a5a6a),
+                  fontSize: 11)),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, null),
+              child: const Text('Cancel',
+                style: TextStyle(color: Color(0xFF8a9ab8)))),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, controller.text),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1a6aff)),
+              child: const Text('Connect')),
+          ],
+        ),
+      ),
+    );
+  } finally {
+    controller.clear();   // remove password reference from controller
+    controller.dispose();
   }
+  return result;
+}
+ 
+  // always ask for password — two factor security
+  final password = await _showPasswordDialog();
+  if (password == null || password.isEmpty) {
+    setState(() {
+      _atlasOnline = false;
+      _statusText  = 'Password required to start Atlas.';
+    });
+    _setOrbState('error');
+    return;
+  }
+ 
+  setState(() { _statusText = 'Connecting...'; });
+  _setOrbState('thinking');
+ 
+  // SSH with key + password together
+  final error = await _atlas.wakeViaSSH(password: password);
+ 
+  if (error != null) {
+    setState(() { _atlasOnline = false; _statusText = error; });
+    _setOrbState('error');
+    return;
+  }
+ 
+  // poll until FastAPI + Atlas are ready
+  for (int i = 0; i < 45; i++) {
+    await Future.delayed(const Duration(seconds: 3));
+    final s = await _atlas.getStatus();
+    setState(() => _statusText = 'Starting Atlas... ${(i + 1) * 3}s');
+    if (s.isRunning) {
+      setState(() { _atlasOnline = true; _statusText = 'Ready'; });
+      _setOrbState('listening');
+      return;
+    }
+  }
+ 
+  setState(() {
+    _atlasOnline = false;
+    _statusText  = 'Atlas took too long to start. Try again.';
+  });
+  _setOrbState('error');
+}
+
 
   // ---------------------------------------------------------------------------
   // Orb

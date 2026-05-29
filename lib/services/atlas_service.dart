@@ -153,17 +153,17 @@ class AtlasService {
 
       await client.authenticated;
 
-      // start FastAPI bound to Tailscale IP only
+      // Change path to var in config
       final session = await client.execute(
-        'cd ~/dev/A.T.L.A.S. && '
-        'source .venv/bin/activate 2>/dev/null && '
+        'cd /home/zero/dev/A.T.L.A.S. && '
         'if ! pgrep -f "uvicorn api.fastapi_server:app" > /dev/null; then '
-        '  TAILSCALE_IP=\$(tailscale ip -4 | head -n1) && '  // head -n1 safety
-        '  mkdir -p ~/.atlas/logs && '
-        '  nohup uvicorn api.fastapi_server:app '
-        '    --host "\$TAILSCALE_IP" '
+        '  mkdir -p /home/zero/.atlas/logs && '
+        '  TSHIP=\$(tailscale ip -4 | head -n1) && '
+        '  echo "IP: \$TSHIP" >> /home/zero/.atlas/logs/fastapi.log && '
+        '  /home/zero/dev/A.T.L.A.S./.venv/bin/uvicorn api.fastapi_server:app '
+        '    --host \$TSHIP '
         '    --port 8000 '
-        '  > ~/.atlas/logs/fastapi.log 2>&1 & '
+        '  >> /home/zero/.atlas/logs/fastapi.log 2>&1 & '
         'fi',
       );
 
@@ -180,7 +180,7 @@ class AtlasService {
       return 'Could not connect to Atlas.'; // generic to user
     } finally {
       client?.close();
-      await socket?.destroy();
+      socket?.destroy();
     }
   }
 
