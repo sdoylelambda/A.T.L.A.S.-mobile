@@ -156,20 +156,19 @@ class AtlasService {
       // Change path to var in config
       final session = await client.execute(
         'cd /home/zero/dev/A.T.L.A.S. && '
-        'if ! pgrep -f "uvicorn api.fastapi_server:app" > /dev/null; then '
-        '  mkdir -p /home/zero/.atlas/logs && '
-        '  TSHIP=\$(tailscale ip -4 | head -n1) && '
-        '  echo "IP: \$TSHIP" >> /home/zero/.atlas/logs/fastapi.log && '
-        '  /home/zero/dev/A.T.L.A.S./.venv/bin/uvicorn api.fastapi_server:app '
-        '    --host \$TSHIP '
-        '    --port 8000 '
-        '  >> /home/zero/.atlas/logs/fastapi.log 2>&1 & '
-        'fi',
+        'mkdir -p /home/zero/.atlas/logs && '
+        'echo "starting uvicorn..." >> /home/zero/.atlas/logs/fastapi.log && '
+        'echo "TSHIP=\$(tailscale ip -4)" >> /home/zero/.atlas/logs/fastapi.log && '
+        '.venv/bin/uvicorn api.fastapi_server:app '
+        '--host 0.0.0.0 '
+        '--port 8000 '
+        '>> /home/zero/.atlas/logs/fastapi.log 2>&1'
       );
 
       // drain silently — no logging of output (#9)
       await session.stdout.drain();
       await session.done;
+      await Future.delayed(const Duration(seconds: 45));
 
       return null; // success
 
