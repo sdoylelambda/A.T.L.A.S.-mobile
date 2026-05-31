@@ -25,7 +25,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   final ScrollController      _drawerScroll   = ScrollController();
   final List<ConversationEntry> _conversation  = [];
 
-  // Orb state
   List<Particle> _particles        = [];
   String  _orbState                = 'listening';
   double  _breathPhase             = 0.0;
@@ -37,12 +36,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   List<(int, int, double)> _beams  = [];
   int     _beamCounter             = 0;
 
-  // Animation controllers
   late AnimationController _orbTicker;
   late AnimationController _textFieldSlide;
   late AnimationController _drawerSlide;
 
-  // App state
   bool   _atlasOnline     = false;
   bool   _isListening     = false;
   bool   _isThinking      = false;
@@ -85,10 +82,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     super.dispose();
   }
 
-  // ---------------------------------------------------------------------------
-  // Init
-  // ---------------------------------------------------------------------------
-
   void _initParticles(int count) {
     _particles = List.generate(count, (_) => Particle.random(_rng));
   }
@@ -122,138 +115,132 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   Future<void> _checkStatus() async {
-  if (!mounted) return;
+    if (!mounted) return;
 
-  Future<String?> _showPasswordDialog() async {
-  final controller = TextEditingController();
-  bool obscure = true;
-  String? result;
- 
-  try {
-    result = await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDlgState) => AlertDialog(
-          backgroundColor: const Color(0xFF1a1a2e),
-          title: const Text('A.T.L.A.S.',
-            style: TextStyle(
-              color:         Color(0xFF1a6aff),
-              fontWeight:    FontWeight.bold,
-              letterSpacing: 3)),
-          content: Column(
-            mainAxisSize:      MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Enter your computer password to start Atlas.',
-                style: TextStyle(
-                  color:    Color(0xFF8a9ab8),
-                  fontSize: 13,
-                  height:   1.4)),
-              const SizedBox(height: 16),
-              TextField(
-                controller:  controller,
-                obscureText: obscure,
-                autofocus:   true,
-                style: const TextStyle(color: Color(0xFFc8d8e8)),
-                decoration: InputDecoration(
-                  hintText:  'Linux password',
-                  hintStyle: const TextStyle(color: Color(0xFF4a5a6a)),
-                  filled:    true,
-                  fillColor: const Color(0xFF0a0a0f),
-                  border: const OutlineInputBorder(
-                    borderSide: BorderSide(color: Color(0xFF2a2a4e))),
-                  enabledBorder: const OutlineInputBorder(
-                    borderSide: BorderSide(color: Color(0xFF2a2a4e))),
-                  focusedBorder: const OutlineInputBorder(
-                    borderSide: BorderSide(color: Color(0xFF1a6aff))),
-                  prefixIcon: const Icon(Icons.lock,
-                    color: Color(0xFF8a9ab8)),
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      obscure ? Icons.visibility : Icons.visibility_off,
-                      color: const Color(0xFF8a9ab8)),
-                    onPressed: () =>
-                      setDlgState(() => obscure = !obscure),
-                  ),
-                ),
-                onSubmitted: (v) => Navigator.pop(ctx, v),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                '🔒 Password + SSH key = two-factor security',
-                style: TextStyle(
-                  color:    Color(0xFF4a5a6a),
-                  fontSize: 11)),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, null),
-              child: const Text('Cancel',
-                style: TextStyle(color: Color(0xFF8a9ab8)))),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, controller.text),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1a6aff)),
-              child: const Text('Connect')),
-          ],
-        ),
-      ),
-    );
-  } finally {
-    controller.clear();   // remove password reference from controller
-    controller.dispose();
-  }
-  return result;
-}
- 
-  // always ask for password — two factor security
-  final password = await _showPasswordDialog();
-  if (password == null || password.isEmpty) {
-    setState(() {
-      _atlasOnline = false;
-      _statusText  = 'Password required to start Atlas.';
-    });
-    _setOrbState('error');
-    return;
-  }
- 
-  setState(() { _statusText = 'Connecting...'; });
-  _setOrbState('thinking');
- 
-  // SSH with key + password together
-  final error = await _atlas.wakeViaSSH(password: password);
- 
-  if (error != null) {
-    setState(() { _atlasOnline = false; _statusText = error; });
-    _setOrbState('error');
-    return;
-  }
- 
-  // poll until FastAPI + Atlas are ready
-  for (int i = 0; i < 45; i++) {
-    await Future.delayed(const Duration(seconds: 3));
-    final s = await _atlas.getStatus();
-    setState(() => _statusText = 'Starting Atlas... ${(i + 1) * 3}s');
-    if (s.isRunning) {
+    setState(() { _statusText = 'Checking...'; });
+    final existing = await _atlas.getStatus();
+    if (existing.isRunning) {
       setState(() { _atlasOnline = true; _statusText = 'Ready'; });
       _setOrbState('listening');
       return;
     }
+
+    final password = await _showPasswordDialog();
+    if (password == null || password.isEmpty) {
+      setState(() {
+        _atlasOnline = false;
+        _statusText  = 'Password required to start Atlas.';
+      });
+      _setOrbState('error');
+      return;
+    }
+
+    setState(() { _statusText = 'Connecting...'; });
+    _setOrbState('thinking');
+
+    final error = await _atlas.wakeViaSSH(password: password);
+    if (error != null) {
+      setState(() { _atlasOnline = false; _statusText = error; });
+      _setOrbState('error');
+      return;
+    }
+
+    await _pollUntilReady();
   }
- 
-  setState(() {
-    _atlasOnline = false;
-    _statusText  = 'Atlas took too long to start. Try again.';
-  });
-  _setOrbState('error');
-}
 
+  Future<void> _pollUntilReady() async {
+    setState(() => _statusText = 'Starting Atlas...');
+    await Future.delayed(const Duration(seconds: 80));
 
-  // ---------------------------------------------------------------------------
-  // Orb
-  // ---------------------------------------------------------------------------
+    for (int i = 0; i < 45; i++) {
+      await Future.delayed(const Duration(seconds: 3));
+      final s = await _atlas.getStatus();
+      setState(() => _statusText = 'Starting Atlas... ${8 + (i + 1) * 3}s');
+      if (s.isRunning) {
+        setState(() { _atlasOnline = true; _statusText = 'Ready'; });
+        _setOrbState('listening');
+        return;
+      }
+    }
+
+    setState(() {
+      _atlasOnline = false;
+      _statusText  = 'Atlas took too long to start. Try again.';
+    });
+    _setOrbState('error');
+  }
+
+  Future<String?> _showPasswordDialog() async {
+    final controller = TextEditingController();
+    bool obscure = true;
+    String? result;
+
+    try {
+      result = await showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => StatefulBuilder(
+          builder: (ctx, setDlgState) => AlertDialog(
+            backgroundColor: const Color(0xFF1a1a2e),
+            title: const Text('A.T.L.A.S.',
+              style: TextStyle(color: Color(0xFF1a6aff),
+                fontWeight: FontWeight.bold, letterSpacing: 3)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Enter your computer password to start Atlas.',
+                  style: TextStyle(color: Color(0xFF8a9ab8), fontSize: 13, height: 1.4)),
+                const SizedBox(height: 16),
+                TextField(
+                  controller:  controller,
+                  obscureText: obscure,
+                  autofocus:   true,
+                  style: const TextStyle(color: Color(0xFFc8d8e8)),
+                  decoration: InputDecoration(
+                    hintText:  'Linux password',
+                    hintStyle: const TextStyle(color: Color(0xFF4a5a6a)),
+                    filled:    true,
+                    fillColor: const Color(0xFF0a0a0f),
+                    border: const OutlineInputBorder(
+                      borderSide: BorderSide(color: Color(0xFF2a2a4e))),
+                    enabledBorder: const OutlineInputBorder(
+                      borderSide: BorderSide(color: Color(0xFF2a2a4e))),
+                    focusedBorder: const OutlineInputBorder(
+                      borderSide: BorderSide(color: Color(0xFF1a6aff))),
+                    prefixIcon: const Icon(Icons.lock, color: Color(0xFF8a9ab8)),
+                    suffixIcon: IconButton(
+                      icon: Icon(obscure ? Icons.visibility : Icons.visibility_off,
+                        color: const Color(0xFF8a9ab8)),
+                      onPressed: () => setDlgState(() => obscure = !obscure),
+                    ),
+                  ),
+                  onSubmitted: (v) => Navigator.pop(ctx, v),
+                ),
+                const SizedBox(height: 8),
+                const Text('🔒 Password + SSH key = two-factor security',
+                  style: TextStyle(color: Color(0xFF4a5a6a), fontSize: 11)),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, null),
+                child: const Text('Cancel',
+                  style: TextStyle(color: Color(0xFF8a9ab8)))),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, controller.text),
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1a6aff)),
+                child: const Text('Connect')),
+            ],
+          ),
+        ),
+      );
+    } finally {
+      controller.clear();
+      controller.dispose();
+    }
+    return result;
+  }
 
   void _tickOrb() {
     if (!mounted) return;
@@ -307,42 +294,29 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _beams = beams.take(beams.length ~/ 5).toList();
   }
 
-  // ---------------------------------------------------------------------------
-  // STT — chunked accumulation to work around Android 5s hard limit
-  // ---------------------------------------------------------------------------
-
   Future<void> _startListening() async {
     if (!_sttReady || _isThinking || _isSpeaking) return;
     await _tts.stop();
-    setState(() {
-      _isListening = true;
-      _heardText   = '';
-      _statusText  = 'Listening...';
-    });
+    setState(() { _isListening = true; _heardText = ''; _statusText = 'Listening...'; });
     _setOrbState('listening');
     await _listenOnce();
   }
 
   Future<void> _listenOnce() async {
     if (!_isListening) return;
-
     await _stt.listen(
       onResult: (r) {
-        setState(() {
-          _heardText = (_accumulatedText + ' ' + r.recognizedWords).trim();
-        });
+        setState(() { _heardText = (_accumulatedText + ' ' + r.recognizedWords).trim(); });
         if (r.finalResult && r.recognizedWords.isNotEmpty) {
           _accumulatedText = (_accumulatedText + ' ' + r.recognizedWords).trim();
         }
       },
-      listenFor:      const Duration(seconds: 10),
-      pauseFor:       const Duration(seconds: 5),
+      listenFor: const Duration(seconds: 10),
+      pauseFor:  const Duration(seconds: 5),
       partialResults: true,
       cancelOnError:  false,
       listenMode:     ListenMode.dictation,
     );
-
-    // always-listen: auto-submit after silence
     if (_alwaysListen && _isListening) {
       _stt.statusListener = (status) {
         if (status == 'done' || status == 'notListening') {
@@ -354,8 +328,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         }
       };
     }
-
-    // push-to-talk: restart chunk if button still held
     if (_holdingButton && _isListening) {
       await Future.delayed(const Duration(milliseconds: 100));
       await _listenOnce();
@@ -365,7 +337,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Future<void> _stopListeningAndSend() async {
     await _stt.stop();
     setState(() => _isListening = false);
-    final text       = _accumulatedText.trim();
+    final text = _accumulatedText.trim();
     _accumulatedText = '';
     if (text.isEmpty) {
       setState(() => _statusText = 'Nothing heard');
@@ -379,43 +351,21 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _holdingButton   = false;
     await _stt.stop();
     setState(() => _isListening = false);
-    final text       = _accumulatedText.trim();
+    final text = _accumulatedText.trim();
     _accumulatedText = '';
-    if (text.isEmpty) {
-      setState(() => _statusText = 'Nothing heard');
-      return;
-    }
+    if (text.isEmpty) { setState(() => _statusText = 'Nothing heard'); return; }
     await _sendCommand(text);
   }
 
-  // ---------------------------------------------------------------------------
-  // Command
-  // ---------------------------------------------------------------------------
-
   Future<void> _sendCommand(String text) async {
     _addConversation('you', text);
-    setState(() {
-      _isThinking   = true;
-      _statusText   = 'Thinking...';
-      _heardText    = '';
-      _responseText = '';
-    });
+    setState(() { _isThinking = true; _statusText = 'Thinking...'; _heardText = ''; _responseText = ''; });
     _setOrbState('thinking');
-
     final response = await _atlas.sendCommand(text);
-
-    setState(() {
-      _isThinking  = false;
-      _atlasOnline = response.success;
-    });
-
+    setState(() { _isThinking = false; _atlasOnline = response.success; });
     if (response.success) {
       _addConversation('atlas', response.text);
-      setState(() {
-        _responseText = response.text;
-        _isSpeaking   = true;
-        _statusText   = 'Speaking...';
-      });
+      setState(() { _responseText = response.text; _isSpeaking = true; _statusText = 'Speaking...'; });
       _setOrbState('speaking');
       if (!_muted) {
         await _tts.speak(response.text);
@@ -426,29 +376,17 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       }
     } else {
       _setOrbState('error');
-      setState(() {
-        _statusText   = 'Error';
-        _responseText = response.text;
-      });
+      setState(() { _statusText = 'Error'; _responseText = response.text; });
       _addConversation('atlas', response.text);
       Future.delayed(const Duration(seconds: 2), () => _setOrbState('listening'));
     }
   }
 
   Future<void> _cancel() async {
-    _holdingButton   = false;
-    _accumulatedText = '';
-    await _stt.stop();
-    await _tts.stop();
-    await _atlas.cancelCommand();
-    setState(() {
-      _isListening  = false;
-      _isThinking   = false;
-      _isSpeaking   = false;
-      _statusText   = 'Cancelled';
-      _heardText    = '';
-      _responseText = '';
-    });
+    _holdingButton = false; _accumulatedText = '';
+    await _stt.stop(); await _tts.stop(); await _atlas.cancelCommand();
+    setState(() { _isListening = false; _isThinking = false; _isSpeaking = false;
+      _statusText = 'Cancelled'; _heardText = ''; _responseText = ''; });
     _setOrbState('listening');
     Future.delayed(const Duration(seconds: 1), () {
       if (mounted) setState(() => _statusText = 'Ready');
@@ -457,25 +395,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   void _addConversation(String role, String text) {
-    setState(() {
-      _conversation.add(ConversationEntry(role: role, text: text, time: DateTime.now()));
-    });
+    setState(() { _conversation.add(ConversationEntry(role: role, text: text, time: DateTime.now())); });
     Future.delayed(const Duration(milliseconds: 100), () {
       if (_drawerScroll.hasClients) {
-        _drawerScroll.animateTo(
-          _drawerScroll.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 200),
-          curve:    Curves.easeOut,
-        );
+        _drawerScroll.animateTo(_drawerScroll.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
       }
     });
   }
 
   void _setStatus(String s) => setState(() => _statusText = s);
-
-  // ---------------------------------------------------------------------------
-  // UI toggles
-  // ---------------------------------------------------------------------------
 
   void _toggleTextField() {
     setState(() => _showTextField = !_showTextField);
@@ -485,8 +414,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   void _toggleDrawer() {
     setState(() => _showDrawer = !_showDrawer);
-    if (_showDrawer) _drawerSlide.forward();
-    else _drawerSlide.reverse();
+    if (_showDrawer) _drawerSlide.forward(); else _drawerSlide.reverse();
   }
 
   void _toggleAlwaysListen() {
@@ -500,14 +428,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   void _submitText() {
     final text = _textController.text.trim();
     if (text.isEmpty) return;
-    _textController.clear();
-    _toggleTextField();
-    _sendCommand(text);
+    _textController.clear(); _toggleTextField(); _sendCommand(text);
   }
-
-  // ---------------------------------------------------------------------------
-  // Build
-  // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -517,18 +439,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       body: SafeArea(
         child: Stack(
           children: [
-            Column(
-              children: [
-                _buildStatusBar(),
-                Expanded(child: _buildOrb()),
-                if (_heardText.isNotEmpty)    _buildHeardText(),
-                if (_responseText.isNotEmpty) _buildResponseText(),
-                _buildStateLabel(),
-                _buildButtons(),
-                if (!_alwaysListen) _buildPushToTalk(),
-                const SizedBox(height: 16),
-              ],
-            ),
+            Column(children: [
+              _buildStatusBar(),
+              Expanded(child: _buildOrb()),
+              if (_heardText.isNotEmpty)    _buildHeardText(),
+              if (_responseText.isNotEmpty) _buildResponseText(),
+              _buildStateLabel(),
+              _buildButtons(),
+              if (!_alwaysListen) _buildPushToTalk(),
+              const SizedBox(height: 16),
+            ]),
             if (_showDrawer)    _buildDrawer(),
             if (_showTextField) _buildTextField(),
           ],
@@ -540,141 +460,65 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   PreferredSizeWidget _buildAppBar() {
     return AppBar(
       backgroundColor: const Color(0xFF0a0a0f),
-      title: const Text('A.T.L.A.S.',
-        style: TextStyle(color: Color(0xFF1a6aff), fontWeight: FontWeight.bold, letterSpacing: 4)),
+      title: const Text('A.T.L.A.S.', style: TextStyle(color: Color(0xFF1a6aff), fontWeight: FontWeight.bold, letterSpacing: 4)),
       actions: [
-        IconButton(
-          icon: Icon(Icons.chat_bubble_outline,
-            color: _showDrawer ? const Color(0xFF1a6aff) : const Color(0xFF8a9ab8)),
-          tooltip: 'Conversation', onPressed: _toggleDrawer,
-        ),
-        IconButton(
-          icon: Icon(_alwaysListen ? Icons.hearing : Icons.hearing_disabled,
-            color: _alwaysListen ? const Color(0xFF00cc66) : const Color(0xFF8a9ab8)),
-          tooltip: _alwaysListen ? 'Always listen ON' : 'Always listen OFF',
-          onPressed: _toggleAlwaysListen,
-        ),
-        IconButton(
-          icon: Icon(_muted ? Icons.volume_off : Icons.volume_up,
-            color: _muted ? const Color(0xFFcc2200) : const Color(0xFF8a9ab8)),
-          tooltip: _muted ? 'Unmute' : 'Mute TTS', onPressed: _toggleMute,
-        ),
-        IconButton(
-          icon: const Icon(Icons.settings, color: Color(0xFF8a9ab8)),
-          onPressed: () async {
-            await Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
-            _checkStatus();
-          },
-        ),
+        IconButton(icon: Icon(Icons.chat_bubble_outline, color: _showDrawer ? const Color(0xFF1a6aff) : const Color(0xFF8a9ab8)), tooltip: 'Conversation', onPressed: _toggleDrawer),
+        IconButton(icon: Icon(_alwaysListen ? Icons.hearing : Icons.hearing_disabled, color: _alwaysListen ? const Color(0xFF00cc66) : const Color(0xFF8a9ab8)), tooltip: _alwaysListen ? 'Always listen ON' : 'Always listen OFF', onPressed: _toggleAlwaysListen),
+        IconButton(icon: Icon(_muted ? Icons.volume_off : Icons.volume_up, color: _muted ? const Color(0xFFcc2200) : const Color(0xFF8a9ab8)), tooltip: _muted ? 'Unmute' : 'Mute TTS', onPressed: _toggleMute),
+        IconButton(icon: const Icon(Icons.settings, color: Color(0xFF8a9ab8)), onPressed: () async { await Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())); _checkStatus(); }),
       ],
     );
   }
 
   Widget _buildStatusBar() {
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      color: const Color(0xFF1a1a2e),
+      width: double.infinity, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6), color: const Color(0xFF1a1a2e),
       child: Row(children: [
-        Container(
-          width: 7, height: 7,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: _atlasOnline ? const Color(0xFF00cc66) : const Color(0xFFcc2200),
-          ),
-        ),
+        Container(width: 7, height: 7, decoration: BoxDecoration(shape: BoxShape.circle, color: _atlasOnline ? const Color(0xFF00cc66) : const Color(0xFFcc2200))),
         const SizedBox(width: 8),
         Text(_statusText, style: const TextStyle(color: Color(0xFF8a9ab8), fontSize: 12)),
         const Spacer(),
-        if (_alwaysListen)
-          const Padding(
-            padding: EdgeInsets.only(right: 8),
-            child: Text('● LIVE',
-              style: TextStyle(color: Color(0xFF00cc66), fontSize: 11,
-                fontWeight: FontWeight.bold, letterSpacing: 1)),
-          ),
-        GestureDetector(
-          onTap: _checkStatus,
-          child: const Icon(Icons.refresh, color: Color(0xFF4a5a6a), size: 16),
-        ),
+        if (_alwaysListen) const Padding(padding: EdgeInsets.only(right: 8), child: Text('● LIVE', style: TextStyle(color: Color(0xFF00cc66), fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1))),
+        GestureDetector(onTap: _checkStatus, child: const Icon(Icons.refresh, color: Color(0xFF4a5a6a), size: 16)),
       ]),
     );
   }
 
   Widget _buildOrb() {
-    return Center(
-      child: RepaintBoundary(
-        child: CustomPaint(
-          painter: OrbPainter(
-            particles: _particles, state: _orbState,
-            breathPhase: _breathPhase, currentColor: _currentColor,
-            currentRadius: _currentRadius, beams: _beams,
-          ),
-          size: const Size(280, 280),
-        ),
-      ),
-    );
+    return Center(child: RepaintBoundary(child: CustomPaint(
+      painter: OrbPainter(particles: _particles, state: _orbState, breathPhase: _breathPhase, currentColor: _currentColor, currentRadius: _currentRadius, beams: _beams),
+      size: const Size(280, 280),
+    )));
   }
 
   Widget _buildHeardText() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 2),
-      child: Text('"$_heardText"',
-        textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis,
-        style: const TextStyle(color: Color(0xFF4499ff), fontSize: 13, fontStyle: FontStyle.italic)),
-    );
+    return Padding(padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 2),
+      child: Text('"$_heardText"', textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis,
+        style: const TextStyle(color: Color(0xFF4499ff), fontSize: 13, fontStyle: FontStyle.italic)));
   }
 
   Widget _buildResponseText() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 2),
-      child: Text(_responseText,
-        textAlign: TextAlign.center, maxLines: 4, overflow: TextOverflow.ellipsis,
-        style: const TextStyle(color: Color(0xFFc8d8e8), fontSize: 14, height: 1.4)),
-    );
+    return Padding(padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 2),
+      child: Text(_responseText, textAlign: TextAlign.center, maxLines: 4, overflow: TextOverflow.ellipsis,
+        style: const TextStyle(color: Color(0xFFc8d8e8), fontSize: 14, height: 1.4)));
   }
 
   Widget _buildStateLabel() {
-    const labels = {'listening':'● Listening ●','thinking':'● Thinking ●',
-      'speaking':'● Speaking ●','error':'● Error ●','sleeping':'● Sleeping ●'};
-    const colors = {'listening':Color(0xFF3a6aee),'thinking':Color(0xFF3aee6a),
-      'speaking':Color(0xFF66ccff),'error':Color(0xFFee3a3a),'sleeping':Color(0xFFeec83a)};
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Text(labels[_orbState] ?? '',
-        style: TextStyle(color: colors[_orbState] ?? const Color(0xFF4a5a6a),
-          fontSize: 11, letterSpacing: 1)),
-    );
+    const labels = {'listening':'● Listening ●','thinking':'● Thinking ●','speaking':'● Speaking ●','error':'● Error ●','sleeping':'● Sleeping ●'};
+    const colors = {'listening':Color(0xFF3a6aee),'thinking':Color(0xFF3aee6a),'speaking':Color(0xFF66ccff),'error':Color(0xFFee3a3a),'sleeping':Color(0xFFeec83a)};
+    return Padding(padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Text(labels[_orbState] ?? '', style: TextStyle(color: colors[_orbState] ?? const Color(0xFF4a5a6a), fontSize: 11, letterSpacing: 1)));
   }
 
   Widget _buildButtons() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Row(children: [
-        Expanded(
-          child: OutlinedButton.icon(
-            onPressed: _cancel,
-            icon: const Icon(Icons.stop, size: 16), label: const Text('Cancel'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFFff6b6b),
-              side: const BorderSide(color: Color(0xFF8e2a2a)),
-              padding: const EdgeInsets.symmetric(vertical: 10),
-            ),
-          ),
-        ),
+        Expanded(child: OutlinedButton.icon(onPressed: _cancel, icon: const Icon(Icons.stop, size: 16), label: const Text('Cancel'),
+          style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFFff6b6b), side: const BorderSide(color: Color(0xFF8e2a2a)), padding: const EdgeInsets.symmetric(vertical: 10)))),
         const SizedBox(width: 8),
-        Expanded(
-          child: OutlinedButton.icon(
-            onPressed: _toggleTextField,
-            icon: Icon(_showTextField ? Icons.keyboard_hide : Icons.keyboard, size: 16),
-            label: const Text('Type'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFF8a9ab8),
-              side: const BorderSide(color: Color(0xFF2a2a4e)),
-              padding: const EdgeInsets.symmetric(vertical: 10),
-            ),
-          ),
-        ),
+        Expanded(child: OutlinedButton.icon(onPressed: _toggleTextField, icon: Icon(_showTextField ? Icons.keyboard_hide : Icons.keyboard, size: 16), label: const Text('Type'),
+          style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFF8a9ab8), side: const BorderSide(color: Color(0xFF2a2a4e)), padding: const EdgeInsets.symmetric(vertical: 10)))),
       ]),
     );
   }
@@ -688,24 +532,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         onTapCancel: ()  => _releaseButton(),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(vertical: 14),
+          width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 14),
           decoration: BoxDecoration(
             color: _isListening ? const Color(0xFF1a3a6e) : const Color(0xFF1a1a2e),
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: _isListening ? const Color(0xFF1a6aff) : const Color(0xFF2a2a4e),
-              width: _isListening ? 2 : 1,
-            ),
-          ),
+            border: Border.all(color: _isListening ? const Color(0xFF1a6aff) : const Color(0xFF2a2a4e), width: _isListening ? 2 : 1)),
           child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Icon(_isListening ? Icons.mic : Icons.mic_none,
-              color: _isListening ? const Color(0xFF1a6aff) : const Color(0xFF8a9ab8), size: 20),
+            Icon(_isListening ? Icons.mic : Icons.mic_none, color: _isListening ? const Color(0xFF1a6aff) : const Color(0xFF8a9ab8), size: 20),
             const SizedBox(width: 8),
             Text(_isListening ? 'Release to send' : 'Hold to speak',
-              style: TextStyle(
-                color: _isListening ? const Color(0xFF4499ff) : const Color(0xFF4a5a6a),
-                fontSize: 14)),
+              style: TextStyle(color: _isListening ? const Color(0xFF4499ff) : const Color(0xFF4a5a6a), fontSize: 14)),
           ]),
         ),
       ),
@@ -714,26 +550,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   Widget _buildDrawer() {
     return SlideTransition(
-      position: Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero)
-        .animate(CurvedAnimation(parent: _drawerSlide, curve: Curves.easeOut)),
-      child: Align(
-        alignment: Alignment.bottomCenter,
+      position: Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero).animate(CurvedAnimation(parent: _drawerSlide, curve: Curves.easeOut)),
+      child: Align(alignment: Alignment.bottomCenter,
         child: Container(
           height: MediaQuery.of(context).size.height * 0.5,
-          decoration: const BoxDecoration(
-            color: Color(0xFF0f0f1a),
-            borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-            border: Border(top: BorderSide(color: Color(0xFF2a2a4e))),
-          ),
+          decoration: const BoxDecoration(color: Color(0xFF0f0f1a), borderRadius: BorderRadius.vertical(top: Radius.circular(16)), border: Border(top: BorderSide(color: Color(0xFF2a2a4e)))),
           child: Column(children: [
-            Container(
-              margin: const EdgeInsets.symmetric(vertical: 8),
-              width: 36, height: 4,
-              decoration: BoxDecoration(color: const Color(0xFF2a2a4e),
-                borderRadius: BorderRadius.circular(2)),
-            ),
-            const Text('Conversation',
-              style: TextStyle(color: Color(0xFF4a5a6a), fontSize: 12, letterSpacing: 1)),
+            Container(margin: const EdgeInsets.symmetric(vertical: 8), width: 36, height: 4, decoration: BoxDecoration(color: const Color(0xFF2a2a4e), borderRadius: BorderRadius.circular(2))),
+            const Text('Conversation', style: TextStyle(color: Color(0xFF4a5a6a), fontSize: 12, letterSpacing: 1)),
             Expanded(child: ConversationDrawer(entries: _conversation)),
           ]),
         ),
@@ -743,48 +567,27 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   Widget _buildTextField() {
     return SlideTransition(
-      position: Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero)
-        .animate(CurvedAnimation(parent: _textFieldSlide, curve: Curves.easeOut)),
-      child: Align(
-        alignment: Alignment.bottomCenter,
+      position: Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero).animate(CurvedAnimation(parent: _textFieldSlide, curve: Curves.easeOut)),
+      child: Align(alignment: Alignment.bottomCenter,
         child: Container(
-          padding: EdgeInsets.only(
-            left: 12, right: 12, top: 12,
-            bottom: MediaQuery.of(context).viewInsets.bottom + 12,
-          ),
-          decoration: const BoxDecoration(
-            color: Color(0xFF0f0f1a),
-            borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
-            border: Border(top: BorderSide(color: Color(0xFF2a2a4e))),
-          ),
+          padding: EdgeInsets.only(left: 12, right: 12, top: 12, bottom: MediaQuery.of(context).viewInsets.bottom + 12),
+          decoration: const BoxDecoration(color: Color(0xFF0f0f1a), borderRadius: BorderRadius.vertical(top: Radius.circular(12)), border: Border(top: BorderSide(color: Color(0xFF2a2a4e)))),
           child: Row(children: [
-            Expanded(
-              child: TextField(
-                controller: _textController, autofocus: true,
-                style: const TextStyle(color: Color(0xFFc8d8e8)),
-                decoration: const InputDecoration(
-                  hintText: 'Type a command...',
-                  hintStyle: TextStyle(color: Color(0xFF4a5a6a)),
-                  filled: true, fillColor: Color(0xFF1a1a2e),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.all(Radius.circular(8)),
-                    borderSide: BorderSide(color: Color(0xFF2a2a4e))),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.all(Radius.circular(8)),
-                    borderSide: BorderSide(color: Color(0xFF2a2a4e))),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.all(Radius.circular(8)),
-                    borderSide: BorderSide(color: Color(0xFF1a6aff))),
-                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                ),
-                onSubmitted: (_) => _submitText(),
+            Expanded(child: TextField(
+              controller: _textController, autofocus: true,
+              style: const TextStyle(color: Color(0xFFc8d8e8)),
+              decoration: const InputDecoration(
+                hintText: 'Type a command...', hintStyle: TextStyle(color: Color(0xFF4a5a6a)),
+                filled: true, fillColor: Color(0xFF1a1a2e),
+                border:         OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(8)), borderSide: BorderSide(color: Color(0xFF2a2a4e))),
+                enabledBorder:  OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(8)), borderSide: BorderSide(color: Color(0xFF2a2a4e))),
+                focusedBorder:  OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(8)), borderSide: BorderSide(color: Color(0xFF1a6aff))),
+                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               ),
-            ),
+              onSubmitted: (_) => _submitText(),
+            )),
             const SizedBox(width: 8),
-            IconButton(
-              onPressed: _submitText,
-              icon: const Icon(Icons.send, color: Color(0xFF1a6aff)),
-            ),
+            IconButton(onPressed: _submitText, icon: const Icon(Icons.send, color: Color(0xFF1a6aff))),
           ]),
         ),
       ),
