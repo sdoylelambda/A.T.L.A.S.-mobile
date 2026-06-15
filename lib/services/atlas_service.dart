@@ -154,15 +154,28 @@ class AtlasService {
       await client.authenticated;
 
       // Change path to var in config
+      // final session = await client.execute(
+      //   'cd /home/zero/dev/A.T.L.A.S. && '
+      //   'mkdir -p /home/zero/.atlas/logs && '
+      //   'echo "starting uvicorn..." >> /home/zero/.atlas/logs/fastapi.log && '
+      //   'echo "TSHIP=\$(tailscale ip -4)" >> /home/zero/.atlas/logs/fastapi.log && '
+      //   '.venv/bin/uvicorn api.fastapi_server:app '
+      //   '--host 0.0.0.0 '
+      //   '--port 8000 '
+      //   '>> /home/zero/.atlas/logs/fastapi.log 2>&1'
+      // );
+
       final session = await client.execute(
-        'cd /home/zero/dev/A.T.L.A.S. && '
-        'mkdir -p /home/zero/.atlas/logs && '
-        'echo "starting uvicorn..." >> /home/zero/.atlas/logs/fastapi.log && '
-        'echo "TSHIP=\$(tailscale ip -4)" >> /home/zero/.atlas/logs/fastapi.log && '
-        '.venv/bin/uvicorn api.fastapi_server:app '
-        '--host 0.0.0.0 '
-        '--port 8000 '
-        '>> /home/zero/.atlas/logs/fastapi.log 2>&1'
+        'export DISPLAY=:1 && '
+        'export WAYLAND_DISPLAY=wayland-1 && '
+        'export XDG_RUNTIME_DIR=\$(echo /run/user/\$(id -u)) && '
+        'export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/\$(id -u)/bus && '
+        'if ! pgrep -f "python main.py" > /dev/null; then '
+        '  mkdir -p /home/zero/.atlas/logs && '
+        '  cd /home/zero/dev/A.T.L.A.S. && '
+        '  nohup /home/zero/dev/A.T.L.A.S./.venv/bin/python main.py '
+        '  > /home/zero/.atlas/logs/atlas.log 2>&1 & '
+        'fi',
       );
 
       // drain silently — no logging of output (#9)
