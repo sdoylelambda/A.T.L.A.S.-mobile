@@ -166,20 +166,19 @@ class AtlasService {
       // );
 
       final session = await client.execute(
-        'cd /home/zero/dev/A.T.L.A.S. && '
-        'mkdir -p /home/zero/.atlas/logs && '
-        'if ! pgrep -f "python main.py" > /dev/null; then '
-        '  DISPLAY=:1 '
-        '  WAYLAND_DISPLAY=wayland-1 '
-        '  XDG_RUNTIME_DIR=/run/user/1000 '
-        '  DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus '
-        '  nohup /home/zero/dev/A.T.L.A.S./.venv/bin/python main.py '
-        '  > /home/zero/.atlas/logs/atlas.log 2>&1 & '
-        'fi',
+        'systemd-run --user '
+        '--scope '
+        '--same-dir '
+        '--collect '
+        '--working-directory=/home/zero/dev/A.T.L.A.S. '
+        '--setenv=DISPLAY=:1 '
+        '--setenv=WAYLAND_DISPLAY=wayland-1 '
+        '--setenv=XDG_RUNTIME_DIR=/run/user/1000 '
+        '--setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus '
+        '/home/zero/dev/A.T.L.A.S./.venv/bin/python '
+        '/home/zero/dev/A.T.L.A.S./main.py',
       );
-
       
-
       // drain silently — no logging of output (#9)
       await session.stdout.drain();
       await session.done;
